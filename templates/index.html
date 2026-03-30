@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FASP-UNet · Brain Tumor Segmentation</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #07090f;
+      --surface:  #0d1117;
+      --surface2: #111820;
+      --border:   rgba(255,255,255,0.07);
+      --border-hi:rgba(99,210,255,0.3);
+      --text:     #d4dde8;
+      --dim:      #5a6a7e;
+      --faint:    #2a3540;
+      --accent:   #63d2ff;
+      --wt:       #ffe566;
+      --tc:       #ff8c42;
+      --et:       #ff4466;
+      --ok:       #4ade80;
+      --glow:     rgba(99,210,255,0.13);
+      --fhead:    'Syne', sans-serif;
+      --fbody:    'DM Sans', sans-serif;
+      --fmono:    'DM Mono', monospace;
+      --r:        8px; --rlg: 14px;
+    }
+
+    body {
+      font-family: var(--fbody); background: var(--bg); color: var(--text);
+      min-height: 100vh; overflow-x: hidden;
+    }
+    body::before {
+      content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+      background-image:
+        linear-gradient(rgba(99,210,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,210,255,.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    .page { position:relative; z-index:1; max-width:1160px; margin:0 auto; padding:0 24px 80px; }
+
+    /* ── Header ── */
+    header {
+      padding:52px 0 36px; display:flex; align-items:flex-start;
+      justify-content:space-between; border-bottom:1px solid var(--border); margin-bottom:44px;
+    }
+    .logo-tag {
+      font-family:var(--fmono); font-size:11px; letter-spacing:.2em; color:var(--accent);
+      text-transform:uppercase; display:flex; align-items:center; gap:8px; margin-bottom:6px;
+    }
+    .logo-tag::before { content:''; width:20px; height:1px; background:var(--accent); }
+    h1 { font-family:var(--fhead); font-size:clamp(24px,4vw,36px); font-weight:800;
+         color:#fff; letter-spacing:-.02em; }
+    h1 span { color:var(--accent); }
+    .subtitle { font-family:var(--fmono); font-size:12px; color:var(--dim); margin-top:4px; }
+    .status-pill {
+      display:flex; align-items:center; gap:7px; font-family:var(--fmono); font-size:11px;
+      color:var(--dim); padding:6px 12px; border:1px solid var(--border);
+      border-radius:40px; background:var(--surface);
+    }
+    .status-dot { width:7px; height:7px; border-radius:50%; background:var(--ok);
+                  box-shadow:0 0 6px var(--ok); animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+
+    /* ── Legend ── */
+    .legend {
+      display:flex; gap:20px; margin-bottom:32px; padding:12px 18px;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--r); width:fit-content;
+    }
+    .legend-item { display:flex; align-items:center; gap:7px;
+                   font-family:var(--fmono); font-size:11px; color:var(--dim); }
+    .ls { width:12px; height:12px; border-radius:2px; }
+
+    /* ── Upload ── */
+    .upload-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+    .file-drop {
+      border:1.5px dashed var(--border); border-radius:var(--rlg); padding:20px 18px;
+      cursor:pointer; transition:all .2s; background:var(--surface); position:relative;
+    }
+    .file-drop:hover, .file-drop.drag-over {
+      border-color:var(--accent); background:rgba(99,210,255,.04);
+    }
+    .file-drop input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+    .drop-label { display:flex; align-items:center; gap:12px; }
+    .drop-icon {
+      width:36px; height:36px; border-radius:8px; background:var(--surface2);
+      border:1px solid var(--border); display:flex; align-items:center;
+      justify-content:center; font-size:16px; flex-shrink:0; transition:all .2s;
+    }
+    .file-drop:hover .drop-icon, .file-drop.loaded .drop-icon {
+      border-color:var(--accent); background:rgba(99,210,255,.1);
+    }
+    .drop-title { font-family:var(--fhead); font-size:13px; font-weight:700; color:#fff; }
+    .drop-hint  { font-family:var(--fmono); font-size:10px; color:var(--dim); margin-top:2px; }
+    .drop-status { font-family:var(--fmono); font-size:10px; color:var(--accent);
+                   margin-top:4px; display:none; }
+    .file-drop.loaded .drop-status { display:block; }
+    .file-drop.loaded { border-color:rgba(99,210,255,.35); }
+
+    /* ── Run ── */
+    .run-row { display:flex; gap:12px; align-items:center; margin-top:2px; }
+    .btn-run {
+      font-family:var(--fhead); font-size:14px; font-weight:700;
+      letter-spacing:.04em; text-transform:uppercase;
+      padding:13px 34px; border:none; border-radius:var(--r);
+      cursor:pointer; background:var(--accent); color:var(--bg); transition:all .2s;
+    }
+    .btn-run:hover { box-shadow:0 0 24px rgba(99,210,255,.4); transform:translateY(-1px); }
+    .btn-run:disabled { opacity:.4; cursor:not-allowed; transform:none; box-shadow:none; }
+    .upload-note { font-family:var(--fmono); font-size:11px; color:var(--dim); }
+
+    /* ── Progress ── */
+    #progress-section { display:none; margin:28px 0; padding:22px;
+      background:var(--surface); border:1px solid var(--border); border-radius:var(--rlg); }
+    #progress-section.active { display:block; }
+    .progress-header { display:flex; justify-content:space-between; margin-bottom:12px; }
+    .progress-label { font-family:var(--fmono); font-size:12px; color:var(--accent); }
+    .progress-pct   { font-family:var(--fmono); font-size:12px; color:var(--dim); }
+    .progress-bar-bg { height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
+    .progress-bar-fill { height:100%; background:var(--accent); border-radius:2px;
+                         transition:width .4s; width:0; box-shadow:0 0 10px var(--accent); }
+    .progress-steps { display:flex; gap:18px; margin-top:16px; flex-wrap:wrap; }
+    .progress-step { display:flex; align-items:center; gap:7px;
+                     font-family:var(--fmono); font-size:11px; color:var(--faint); transition:color .3s; }
+    .progress-step.done { color:var(--ok); }
+    .progress-step.active-step { color:var(--accent); }
+    .step-dot { width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; }
+
+    /* ── Error ── */
+    #error-box { display:none; margin:20px 0; padding:14px 18px;
+      background:rgba(255,68,102,.08); border:1px solid rgba(255,68,102,.3);
+      border-radius:var(--r); font-family:var(--fmono); font-size:12px; color:var(--et); }
+    #error-box.active { display:block; }
+
+    /* ── Results ── */
+    #results-section { display:none; }
+    #results-section.active { display:block; animation:fadeUp .5s ease; }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+
+    .results-header {
+      display:flex; align-items:flex-start; justify-content:space-between;
+      margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid var(--border);
+      flex-wrap:wrap; gap:16px;
+    }
+    .results-title { font-family:var(--fhead); font-size:20px; font-weight:700; color:#fff; }
+    .results-meta  { font-family:var(--fmono); font-size:11px; color:var(--dim); margin-top:4px; }
+
+    /* ── Download buttons ── */
+    .download-group { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn-dl {
+      display:flex; align-items:center; gap:7px;
+      font-family:var(--fmono); font-size:11px; font-weight:500;
+      padding:9px 16px; border-radius:var(--r);
+      background:transparent; cursor:pointer;
+      text-decoration:none; transition:all .2s; white-space:nowrap;
+    }
+    .btn-dl-nii  { color:var(--accent); border:1px solid var(--border-hi); }
+    .btn-dl-nii:hover  { background:var(--glow); border-color:var(--accent); }
+    .btn-dl-overlay  { color:var(--wt); border:1px solid rgba(255,229,102,.3); }
+    .btn-dl-overlay:hover  { background:rgba(255,229,102,.08); border-color:var(--wt); }
+    .btn-dl-mask  { color:var(--et); border:1px solid rgba(255,68,102,.3); }
+    .btn-dl-mask:hover  { background:rgba(255,68,102,.08); border-color:var(--et); }
+
+    /* ── Stats ── */
+    .stats-row { display:flex; gap:10px; margin-bottom:28px; flex-wrap:wrap; }
+    .stat-card { flex:1; min-width:130px; padding:14px 16px;
+      background:var(--surface); border:1px solid var(--border); border-radius:var(--r); }
+    .stat-val  { font-family:var(--fhead); font-size:26px; font-weight:800; color:#fff; line-height:1; }
+    .stat-val.wt { color:var(--wt); } .stat-val.tc { color:var(--tc); } .stat-val.et { color:var(--et); }
+    .stat-label { font-family:var(--fmono); font-size:10px; color:var(--dim);
+                  margin-top:4px; text-transform:uppercase; letter-spacing:.1em; }
+
+    /* ── Viewer controls ── */
+    .viewer-controls {
+      display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;
+    }
+    .viewer-label { font-family:var(--fmono); font-size:11px; color:var(--dim); }
+    .toggle-group { display:flex; gap:4px; }
+    .toggle-btn {
+      font-family:var(--fmono); font-size:11px; padding:5px 11px; border-radius:4px;
+      cursor:pointer; border:1px solid var(--border); background:transparent;
+      color:var(--dim); transition:all .15s;
+    }
+    .toggle-btn.active { background:var(--accent); color:var(--bg); border-color:var(--accent); }
+    .toggle-btn:hover:not(.active) { border-color:var(--accent); color:var(--accent); }
+
+    .slice-nav { display:flex; align-items:center; gap:8px; margin-left:auto; }
+    .nav-btn {
+      width:28px; height:28px; border-radius:4px; border:1px solid var(--border);
+      background:var(--surface); color:var(--text); cursor:pointer; font-size:14px;
+      display:flex; align-items:center; justify-content:center; transition:all .15s;
+    }
+    .nav-btn:hover { border-color:var(--accent); color:var(--accent); }
+    .slice-counter { font-family:var(--fmono); font-size:12px; color:var(--dim);
+                     min-width:90px; text-align:center; }
+
+    input[type=range] {
+      -webkit-appearance:none; width:100%; height:3px; background:var(--border);
+      border-radius:2px; outline:none; margin:10px 0;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+      background:var(--accent); cursor:pointer; box-shadow:0 0 8px var(--accent);
+    }
+
+    /* ── 3-panel viewer ── */
+    .viewer-main {
+      display:grid; gap:10px; margin-bottom:14px;
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+    .viewer-main.mode-flair   { grid-template-columns: 1fr; }
+    .viewer-main.mode-overlay { grid-template-columns: 1fr; }
+    .viewer-main.mode-mask    { grid-template-columns: 1fr; }
+    .viewer-main.mode-two-ol  { grid-template-columns: 1fr 1fr; }
+    .viewer-main.mode-two-mk  { grid-template-columns: 1fr 1fr; }
+
+    .view-pane {
+      background:#000; border-radius:var(--r); border:1px solid var(--border);
+      overflow:hidden; position:relative;
+    }
+    .view-pane-label {
+      position:absolute; top:8px; left:8px; z-index:2;
+      font-family:var(--fmono); font-size:9px; letter-spacing:.1em;
+      color:rgba(255,255,255,.5); text-transform:uppercase;
+      background:rgba(0,0,0,.55); padding:3px 7px; border-radius:3px;
+    }
+    .view-pane img { width:100%; display:block; image-rendering:pixelated; }
+
+    /* ── Class badges ── */
+    .class-badges { display:flex; gap:6px; margin-top:8px; }
+    .class-badge {
+      font-family:var(--fmono); font-size:10px; padding:3px 9px;
+      border-radius:3px; opacity:.25; transition:opacity .2s;
+    }
+    .class-badge.present { opacity:1; }
+    .badge-wt { background:rgba(255,229,102,.15); color:var(--wt); border:1px solid rgba(255,229,102,.3); }
+    .badge-tc { background:rgba(255,140,66,.15);  color:var(--tc); border:1px solid rgba(255,140,66,.3); }
+    .badge-et { background:rgba(255,68,102,.15);  color:var(--et); border:1px solid rgba(255,68,102,.3); }
+
+    /* ── Thumbnail strip ── */
+    .thumb-strip {
+      display:flex; gap:5px; overflow-x:auto; padding:8px 2px;
+      scrollbar-width:thin; scrollbar-color:var(--border) transparent;
+    }
+    .thumb-item {
+      flex-shrink:0; width:58px; cursor:pointer; border-radius:4px; overflow:hidden;
+      border:1.5px solid transparent; transition:border-color .15s; position:relative;
+    }
+    .thumb-item.active { border-color:var(--accent); }
+    .thumb-item img { width:100%; display:block; image-rendering:pixelated; }
+    .thumb-idx { position:absolute; bottom:2px; right:3px;
+                 font-family:var(--fmono); font-size:9px; color:rgba(255,255,255,.6); }
+    .thumb-dot { position:absolute; top:3px; left:3px; width:5px; height:5px;
+                 border-radius:50%; background:var(--et); }
+
+    /* ── Footer ── */
+    footer {
+      margin-top:64px; padding-top:20px; border-top:1px solid var(--border);
+      display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+      font-family:var(--fmono); font-size:11px; color:var(--faint);
+    }
+
+    @media(max-width:700px) {
+      .upload-grid { grid-template-columns:1fr; }
+      .viewer-main, .viewer-main[class*="mode-two"] { grid-template-columns:1fr; }
+      header { flex-direction:column; gap:14px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <header>
+    <div>
+      <div class="logo-tag">Medical AI · BraTS 2023</div>
+      <h1>FASP-<span>UNet</span></h1>
+      <div class="subtitle">Brain Tumor Segmentation · WT / TC / ET · 4-Modal MRI</div>
+    </div>
+    <div class="status-pill">
+      <span class="status-dot"></span><span>Server online</span>
+    </div>
+  </header>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="ls" style="background:var(--wt)"></div>WT — Whole Tumour</div>
+    <div class="legend-item"><div class="ls" style="background:var(--tc)"></div>TC — Tumour Core</div>
+    <div class="legend-item"><div class="ls" style="background:var(--et)"></div>ET — Enhancing Tumour</div>
+  </div>
+
+  <!-- Upload form -->
+  <form id="upload-form">
+    <div class="upload-grid">
+      <div class="file-drop" id="drop-t1">
+        <input type="file" name="t1" accept=".nii,.nii.gz" id="file-t1"/>
+        <div class="drop-label">
+          <div class="drop-icon">🧠</div>
+          <div><div class="drop-title">T1</div>
+               <div class="drop-hint">Native T1 · .nii.gz</div>
+               <div class="drop-status" id="status-t1"></div></div>
+        </div>
+      </div>
+      <div class="file-drop" id="drop-t1ce">
+        <input type="file" name="t1ce" accept=".nii,.nii.gz" id="file-t1ce"/>
+        <div class="drop-label">
+          <div class="drop-icon">💉</div>
+          <div><div class="drop-title">T1ce</div>
+               <div class="drop-hint">Contrast-enhanced · .nii.gz</div>
+               <div class="drop-status" id="status-t1ce"></div></div>
+        </div>
+      </div>
+      <div class="file-drop" id="drop-t2">
+        <input type="file" name="t2" accept=".nii,.nii.gz" id="file-t2"/>
+        <div class="drop-label">
+          <div class="drop-icon">🔬</div>
+          <div><div class="drop-title">T2</div>
+               <div class="drop-hint">T2-weighted · .nii.gz</div>
+               <div class="drop-status" id="status-t2"></div></div>
+        </div>
+      </div>
+      <div class="file-drop" id="drop-flair">
+        <input type="file" name="flair" accept=".nii,.nii.gz" id="file-flair"/>
+        <div class="drop-label">
+          <div class="drop-icon">🌊</div>
+          <div><div class="drop-title">FLAIR</div>
+               <div class="drop-hint">T2-FLAIR · .nii.gz</div>
+               <div class="drop-status" id="status-flair"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="run-row">
+      <button type="submit" class="btn-run" id="btn-run">Run Segmentation</button>
+      <span class="upload-note">All 4 modalities required · ~1–3 min on CPU</span>
+    </div>
+  </form>
+
+  <!-- Progress -->
+  <div id="progress-section">
+    <div class="progress-header">
+      <span class="progress-label" id="progress-label">Uploading…</span>
+      <span class="progress-pct"   id="progress-pct">—</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progress-bar"></div>
+    </div>
+    <div class="progress-steps">
+      <div class="progress-step" id="step-upload"><span class="step-dot"></span>Upload</div>
+      <div class="progress-step" id="step-norm">  <span class="step-dot"></span>Normalise</div>
+      <div class="progress-step" id="step-infer"> <span class="step-dot"></span>Inference</div>
+      <div class="progress-step" id="step-post">  <span class="step-dot"></span>Post-process</div>
+      <div class="progress-step" id="step-render"><span class="step-dot"></span>Render</div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="error-box"></div>
+
+  <!-- Results -->
+  <div id="results-section">
+
+    <div class="results-header">
+      <div>
+        <div class="results-title">Segmentation Results</div>
+        <div class="results-meta" id="results-meta"></div>
+      </div>
+      <div class="download-group">
+        <a class="btn-dl btn-dl-nii"     id="dl-nii"     href="#" download>⬇ Label map (.nii.gz)</a>
+        <a class="btn-dl btn-dl-overlay" id="dl-overlay" href="#" download>⬇ Overlay mask (.nii.gz)</a>
+        <a class="btn-dl btn-dl-mask"    id="dl-mask"    href="#" download>⬇ Binary mask (.nii.gz)</a>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row" id="stats-row"></div>
+
+    <!-- View mode controls -->
+    <div class="viewer-controls">
+      <span class="viewer-label">View:</span>
+      <div class="toggle-group">
+        <button class="toggle-btn active" data-mode="all"     onclick="setMode('all')">All 3</button>
+        <button class="toggle-btn"        data-mode="flair"   onclick="setMode('flair')">MRI only</button>
+        <button class="toggle-btn"        data-mode="overlay" onclick="setMode('overlay')">Overlay only</button>
+        <button class="toggle-btn"        data-mode="mask"    onclick="setMode('mask')">Mask only</button>
+        <button class="toggle-btn"        data-mode="two-ol"  onclick="setMode('two-ol')">MRI + Overlay</button>
+        <button class="toggle-btn"        data-mode="two-mk"  onclick="setMode('two-mk')">MRI + Mask</button>
+      </div>
+      <div class="slice-nav">
+        <button class="nav-btn" onclick="stepSlice(-1)">‹</button>
+        <span class="slice-counter" id="slice-counter">1 / 1</span>
+        <button class="nav-btn" onclick="stepSlice(1)">›</button>
+      </div>
+    </div>
+
+    <input type="range" id="slice-slider" min="0" value="0" oninput="goToSlice(+this.value)"/>
+
+    <!-- 3 panels -->
+    <div class="viewer-main" id="viewer-main">
+      <div class="view-pane" id="pane-flair">
+        <div class="view-pane-label">FLAIR Input</div>
+        <img id="img-mri" src="" alt="MRI"/>
+      </div>
+      <div class="view-pane" id="pane-overlay">
+        <div class="view-pane-label">Segmentation Overlay</div>
+        <img id="img-overlay" src="" alt="Overlay"/>
+      </div>
+      <div class="view-pane" id="pane-mask">
+        <div class="view-pane-label">Mask Only</div>
+        <img id="img-mask" src="" alt="Mask"/>
+      </div>
+    </div>
+
+    <!-- Class badges -->
+    <div class="class-badges">
+      <div class="class-badge badge-wt" id="badge-wt">WT — Whole Tumour</div>
+      <div class="class-badge badge-tc" id="badge-tc">TC — Tumour Core</div>
+      <div class="class-badge badge-et" id="badge-et">ET — Enhancing Tumour</div>
+    </div>
+
+    <!-- Thumbnail strip (shows overlay thumbnails) -->
+    <div class="thumb-strip" id="thumb-strip"></div>
+
+  </div><!-- /results -->
+
+  <footer>
+    <span>FASP-UNet v5 · BraTS 2023 · 4-channel MRI</span>
+    <span>For research use only — not for clinical diagnosis</span>
+  </footer>
+
+</div><!-- /page -->
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let sliceData  = [];
+let currentIdx = 0;
+let viewMode   = 'all';
+
+// ── File input labels ─────────────────────────────────────────────────────────
+['t1','t1ce','t2','flair'].forEach(key => {
+  const input  = document.getElementById(`file-${key}`);
+  const drop   = document.getElementById(`drop-${key}`);
+  const status = document.getElementById(`status-${key}`);
+
+  input.addEventListener('change', () => {
+    if (!input.files[0]) return;
+    const mb = (input.files[0].size / 1048576).toFixed(1);
+    status.textContent = `✓ ${input.files[0].name}  (${mb} MB)`;
+    drop.classList.add('loaded');
+  });
+  drop.addEventListener('dragover',  e => { e.preventDefault(); drop.classList.add('drag-over'); });
+  drop.addEventListener('dragleave', ()=> drop.classList.remove('drag-over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    const dt = new DataTransfer(); dt.items.add(f); input.files = dt.files;
+    status.textContent = `✓ ${f.name}  (${(f.size/1048576).toFixed(1)} MB)`;
+    drop.classList.add('loaded');
+  });
+});
+
+// ── Progress ──────────────────────────────────────────────────────────────────
+const STEPS = ['upload','norm','infer','post','render'];
+function setProgress(pct, label, done=[]) {
+  document.getElementById('progress-bar').style.width   = pct + '%';
+  document.getElementById('progress-pct').textContent   = pct + '%';
+  document.getElementById('progress-label').textContent = label;
+  STEPS.forEach((s,i) => {
+    const el = document.getElementById(`step-${s}`);
+    el.className = 'progress-step';
+    if (done.includes(s))       el.classList.add('done');
+    else if (i === done.length) el.classList.add('active-step');
+  });
+}
+
+// ── Form submit ───────────────────────────────────────────────────────────────
+document.getElementById('upload-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  for (const k of ['t1','t1ce','t2','flair']) {
+    if (!document.getElementById(`file-${k}`).files[0]) {
+      showError(`Please select the ${k.toUpperCase()} file.`); return;
+    }
+  }
+
+  document.getElementById('error-box').className      = '';
+  document.getElementById('results-section').className= '';
+  document.getElementById('progress-section').className='active';
+  document.getElementById('btn-run').disabled = true;
+
+  setProgress(10, 'Uploading files…', []);
+
+  const fd = new FormData(document.getElementById('upload-form'));
+
+  // Fake progress ticks while server processes
+  const stages = [
+    [25, 'Normalising volumes…',    ['upload']],
+    [45, 'Running inference…',      ['upload','norm']],
+    [70, 'Post-processing…',        ['upload','norm','infer']],
+    [88, 'Rendering slices…',       ['upload','norm','infer','post']],
+  ];
+  let si = 0;
+  const timer = setInterval(() => {
+    if (si < stages.length) { setProgress(...stages[si]); si++; }
+  }, 3500);
+
+  try {
+    const res  = await fetch('/predict', { method:'POST', body:fd });
+    const data = await res.json();
+    clearInterval(timer);
+
+    if (!res.ok || data.error) { showError(data.error || 'Server error'); return; }
+
+    setProgress(100, 'Done!', STEPS);
+    setTimeout(() => {
+      document.getElementById('progress-section').className = '';
+      renderResults(data);
+    }, 500);
+
+  } catch(err) {
+    clearInterval(timer);
+    showError('Network error: ' + err.message);
+  } finally {
+    document.getElementById('btn-run').disabled = false;
+  }
+});
+
+// ── Render results ────────────────────────────────────────────────────────────
+function renderResults(data) {
+  sliceData  = data.slice_data;
+  currentIdx = 0;
+
+  document.getElementById('results-meta').textContent =
+    `${data.total_slices} total slices · ${data.tumor_slices.length} tumour slices · ${data.display_count} shown`;
+
+  // Download links
+  document.getElementById('dl-nii').href     = `/download/${data.nii_filename}`;
+  document.getElementById('dl-overlay').href = `/download/${data.nii_filename}`;
+  document.getElementById('dl-mask').href    = `/download/${data.mask_nii_filename}`;
+
+  // Stats
+  const wt = sliceData.filter(s => s.class_presence.WT).length;
+  const tc = sliceData.filter(s => s.class_presence.TC).length;
+  const et = sliceData.filter(s => s.class_presence.ET).length;
+  document.getElementById('stats-row').innerHTML = `
+    <div class="stat-card"><div class="stat-val">${data.tumor_slices.length}</div><div class="stat-label">Tumour Slices</div></div>
+    <div class="stat-card"><div class="stat-val wt">${wt}</div><div class="stat-label">WT Slices</div></div>
+    <div class="stat-card"><div class="stat-val tc">${tc}</div><div class="stat-label">TC Slices</div></div>
+    <div class="stat-card"><div class="stat-val et">${et}</div><div class="stat-label">ET Slices</div></div>
+  `;
+
+  // Slider
+  const slider = document.getElementById('slice-slider');
+  slider.max   = sliceData.length - 1;
+  slider.value = 0;
+
+  // Thumbnails — show overlay
+  const strip = document.getElementById('thumb-strip');
+  strip.innerHTML = '';
+  sliceData.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className   = 'thumb-item' + (i === 0 ? ' active' : '');
+    div.dataset.idx = i;
+    div.innerHTML   = `
+      <img src="data:image/png;base64,${s.overlay_b64}" loading="lazy"/>
+      <span class="thumb-idx">${s.slice_idx}</span>
+      ${s.class_presence.ET ? '<span class="thumb-dot"></span>' : ''}
+    `;
+    div.onclick = () => goToSlice(i);
+    strip.appendChild(div);
+  });
+
+  document.getElementById('results-section').className = 'active';
+  showSlice(0);
+}
+
+// ── Slice viewer ──────────────────────────────────────────────────────────────
+function showSlice(idx) {
+  if (!sliceData.length) return;
+  idx = Math.max(0, Math.min(idx, sliceData.length - 1));
+  currentIdx = idx;
+  const s = sliceData[idx];
+
+  document.getElementById('img-mri').src     = `data:image/png;base64,${s.mri_b64}`;
+  document.getElementById('img-overlay').src = `data:image/png;base64,${s.overlay_b64}`;
+  document.getElementById('img-mask').src    = `data:image/png;base64,${s.mask_b64}`;
+
+  document.getElementById('slice-counter').textContent =
+    `${idx+1} / ${sliceData.length}  [z=${s.slice_idx}]`;
+  document.getElementById('slice-slider').value = idx;
+
+  ['wt','tc','et'].forEach(c => {
+    document.getElementById(`badge-${c}`)
+      .classList.toggle('present', s.class_presence[c.toUpperCase()]);
+  });
+
+  document.querySelectorAll('.thumb-item').forEach(t =>
+    t.classList.toggle('active', +t.dataset.idx === idx));
+  const th = document.querySelector(`.thumb-item[data-idx="${idx}"]`);
+  if (th) th.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'center' });
+
+  applyMode();
+}
+
+function goToSlice(idx) { showSlice(+idx); }
+function stepSlice(d)   { showSlice(currentIdx + d); }
+
+// ── View mode ─────────────────────────────────────────────────────────────────
+function setMode(mode) {
+  viewMode = mode;
+  document.querySelectorAll('.toggle-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  applyMode();
+}
+
+function applyMode() {
+  const main    = document.getElementById('viewer-main');
+  const pFlair  = document.getElementById('pane-flair');
+  const pOver   = document.getElementById('pane-overlay');
+  const pMask   = document.getElementById('pane-mask');
+
+  // Reset
+  main.className  = 'viewer-main';
+  pFlair.style.display = pOver.style.display = pMask.style.display = '';
+
+  switch(viewMode) {
+    case 'all':
+      main.classList.add('mode-all'); break;
+    case 'flair':
+      main.classList.add('mode-flair');
+      pOver.style.display = pMask.style.display = 'none'; break;
+    case 'overlay':
+      main.classList.add('mode-overlay');
+      pFlair.style.display = pMask.style.display = 'none'; break;
+    case 'mask':
+      main.classList.add('mode-mask');
+      pFlair.style.display = pOver.style.display = 'none'; break;
+    case 'two-ol':
+      main.classList.add('mode-two-ol');
+      pMask.style.display = 'none'; break;
+    case 'two-mk':
+      main.classList.add('mode-two-mk');
+      pOver.style.display = 'none'; break;
+  }
+}
+
+// ── Keyboard nav ──────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') stepSlice(1);
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   stepSlice(-1);
+});
+
+// ── Error ─────────────────────────────────────────────────────────────────────
+function showError(msg) {
+  document.getElementById('progress-section').className = '';
+  const b = document.getElementById('error-box');
+  b.textContent = '✗  ' + msg;
+  b.className   = 'active';
+}
+</script>
+</body>
+</html>
