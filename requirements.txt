@@ -1,0 +1,8 @@
+flask
+torch
+torchvision
+opencv-python-headless
+numpy
+nibabel
+scipy
+pillow
